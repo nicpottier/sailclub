@@ -77,13 +77,15 @@ window.addEventListener('keyup', (e) => {
 });
 
 // ── Touch input ───────────────────────────────────────────────
-let touchStartX = 0;
-let touchSteering = 0; // -1 = right/starboard, 0 = none, +1 = left/port
-const TOUCH_DEAD_ZONE = 15; // pixels before steering engages
+// Touch-down sets the center point. Moving left/right of that steers.
+// Keeping your finger still = no turn. Lifting = no turn.
+let touchCenterX = 0;
+let touchSteering = 0; // -1 = starboard, 0 = none, +1 = port
+const TOUCH_DEAD_ZONE = 10; // pixels before steering engages
 
 renderer.domElement.addEventListener('touchstart', (e) => {
   if (e.touches.length === 1) {
-    touchStartX = e.touches[0].clientX;
+    touchCenterX = e.touches[0].clientX;
     touchSteering = 0;
     e.preventDefault();
   }
@@ -91,9 +93,9 @@ renderer.domElement.addEventListener('touchstart', (e) => {
 
 renderer.domElement.addEventListener('touchmove', (e) => {
   if (e.touches.length === 1) {
-    const dx = e.touches[0].clientX - touchStartX;
-    if (dx > TOUCH_DEAD_ZONE) touchSteering = -1;       // drag right = starboard
-    else if (dx < -TOUCH_DEAD_ZONE) touchSteering = 1;  // drag left = port
+    const dx = e.touches[0].clientX - touchCenterX;
+    if (dx > TOUCH_DEAD_ZONE) touchSteering = -1;       // finger right of center = starboard
+    else if (dx < -TOUCH_DEAD_ZONE) touchSteering = 1;  // finger left of center = port
     else touchSteering = 0;
     e.preventDefault();
   }
