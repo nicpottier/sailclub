@@ -80,8 +80,9 @@ window.addEventListener('keyup', (e) => {
 // Touch-down sets the center point. Moving left/right of that steers.
 // Keeping your finger still = no turn. Lifting = no turn.
 let touchCenterX = 0;
-let touchSteering = 0; // -1 = starboard, 0 = none, +1 = port
-const TOUCH_DEAD_ZONE = 10; // pixels before steering engages
+let touchSteering = 0; // -1..+1 continuous: negative = starboard, positive = port
+const TOUCH_DEAD_ZONE = 30; // pixels before steering engages
+const TOUCH_MAX_ZONE = 120; // pixels for full-speed steering
 
 renderer.domElement.addEventListener('touchstart', (e) => {
   if (e.touches.length === 1) {
@@ -94,9 +95,14 @@ renderer.domElement.addEventListener('touchstart', (e) => {
 renderer.domElement.addEventListener('touchmove', (e) => {
   if (e.touches.length === 1) {
     const dx = e.touches[0].clientX - touchCenterX;
-    if (dx > TOUCH_DEAD_ZONE) touchSteering = -1;       // finger right of center = starboard
-    else if (dx < -TOUCH_DEAD_ZONE) touchSteering = 1;  // finger left of center = port
-    else touchSteering = 0;
+    const absDx = Math.abs(dx);
+    if (absDx < TOUCH_DEAD_ZONE) {
+      touchSteering = 0;
+    } else {
+      // Ramp from 0 at dead zone edge to 1 at max zone
+      const strength = Math.min((absDx - TOUCH_DEAD_ZONE) / (TOUCH_MAX_ZONE - TOUCH_DEAD_ZONE), 1);
+      touchSteering = dx < 0 ? strength : -strength; // left = port (+), right = starboard (-)
+    }
     e.preventDefault();
   }
 }, { passive: false });
@@ -125,10 +131,10 @@ function animate() {
 
   // Steering (keyboard + touch)
   const prevWindAngle = windAngle;
-  const steerLeft = keys.left || touchSteering > 0;
-  const steerRight = keys.right || touchSteering < 0;
-  if (steerLeft) windAngle += TURN_SPEED * dt;
-  if (steerRight) windAngle -= TURN_SPEED * dt;
+  let steer = touchSteering; // continuous -1..+1
+  if (keys.left) steer = 1;
+  if (keys.right) steer = -1;
+  windAngle += steer * TURN_SPEED * dt;
   while (windAngle > Math.PI) windAngle -= 2 * Math.PI;
   while (windAngle < -Math.PI) windAngle += 2 * Math.PI;
 
