@@ -6,6 +6,8 @@ import { createLandscape } from './landscape';
 import { createWindHUD, updateWindHUD } from './hud';
 import { Quiz } from './quiz';
 
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
 // Renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -19,11 +21,15 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 scene.fog = new THREE.FogExp2(0xa8cce0, 0.012);
 
-// Camera
+// Camera — pull back on mobile for wider view
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 200);
-camera.position.set(0.3, 1.4, 3.5);
+if (isTouchDevice) {
+  camera.position.set(0.3, 2.2, 6.5);
+} else {
+  camera.position.set(0.3, 1.4, 3.5);
+}
 
-// Orbit controls
+// Orbit controls — desktop only
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.2, -1);
 controls.minDistance = 3;
@@ -31,6 +37,9 @@ controls.maxDistance = 20;
 controls.maxPolarAngle = Math.PI / 2.05;
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
+if (isTouchDevice) {
+  controls.enabled = false;
+}
 controls.update();
 
 // Lighting
@@ -46,7 +55,7 @@ scene.add(boat);
 const water = createWater();
 scene.add(water);
 
-// Distant landscape — rotates around the boat when heading changes
+// Distant landscape
 const landscape = createLandscape();
 scene.add(landscape);
 
@@ -56,7 +65,7 @@ createWindHUD();
 // Quiz
 const quiz = new Quiz();
 
-// ── Input ─────────────────────────────────────────────────────
+// ── Keyboard input ────────────────────────────────────────────
 const keys = { left: false, right: false };
 window.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') { keys.left = true; e.preventDefault(); }
@@ -67,11 +76,39 @@ window.addEventListener('keyup', (e) => {
   if (e.key === 'ArrowRight') keys.right = false;
 });
 
+// ── Touch input ───────────────────────────────────────────────
+let touchStartX = 0;
+let touchSteering = 0; // -1 = right/starboard, 0 = none, +1 = left/port
+const TOUCH_DEAD_ZONE = 15; // pixels before steering engages
+
+renderer.domElement.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 1) {
+    touchStartX = e.touches[0].clientX;
+    touchSteering = 0;
+    e.preventDefault();
+  }
+}, { passive: false });
+
+renderer.domElement.addEventListener('touchmove', (e) => {
+  if (e.touches.length === 1) {
+    const dx = e.touches[0].clientX - touchStartX;
+    if (dx > TOUCH_DEAD_ZONE) touchSteering = -1;       // drag right = starboard
+    else if (dx < -TOUCH_DEAD_ZONE) touchSteering = 1;  // drag left = port
+    else touchSteering = 0;
+    e.preventDefault();
+  }
+}, { passive: false });
+
+renderer.domElement.addEventListener('touchend', (e) => {
+  touchSteering = 0;
+  e.preventDefault();
+}, { passive: false });
+
 // ── State ─────────────────────────────────────────────────────
 let windAngle = INITIAL_WIND_ANGLE;
 let flowOffset = 0;
 let currentHeel = 0;
-let headingOffset = 0; // cumulative boat heading change (for landscape rotation)
+let headingOffset = 0;
 const TURN_SPEED = 0.8;
 const MAX_FLOW_SPEED = 1.8;
 const MAX_HEEL = 0.12;
@@ -84,18 +121,20 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
   const elapsed = clock.elapsedTime;
 
-  // Steering
+  // Steering (keyboard + touch)
   const prevWindAngle = windAngle;
-  if (keys.left) windAngle += TURN_SPEED * dt;
-  if (keys.right) windAngle -= TURN_SPEED * dt;
+  const steerLeft = keys.left || touchSteering > 0;
+  const steerRight = keys.right || touchSteering < 0;
+  if (steerLeft) windAngle += TURN_SPEED * dt;
+  if (steerRight) windAngle -= TURN_SPEED * dt;
   while (windAngle > Math.PI) windAngle -= 2 * Math.PI;
   while (windAngle < -Math.PI) windAngle += 2 * Math.PI;
 
-  // Track heading change (boat turns opposite to wind change)
+  // Track heading change
   let windDelta = windAngle - prevWindAngle;
   if (windDelta > Math.PI) windDelta -= 2 * Math.PI;
   if (windDelta < -Math.PI) windDelta += 2 * Math.PI;
-  headingOffset -= windDelta; // landscape rotates opposite to wind change
+  headingOffset -= windDelta;
 
   // Sails
   updateSails(windAngle, dt, elapsed);
@@ -110,7 +149,7 @@ function animate() {
     Math.sign(windAngle) * speed * Math.sin(Math.min(absWind, Math.PI / 2)) * MAX_HEEL;
   currentHeel += (heelTarget - currentHeel) * (1 - Math.exp(-2 * dt));
 
-  // Rotate landscape around the boat
+  // Rotate landscape
   landscape.rotation.y = headingOffset;
 
   // Wind gauge
