@@ -4,6 +4,7 @@ import { createBoat, updateSails, getBoatSpeed, INITIAL_WIND_ANGLE } from './boa
 import { createWater } from './water';
 import { createLandscape } from './landscape';
 import { createWindHUD, updateWindHUD } from './hud';
+import { Quiz } from './quiz';
 
 // Renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -51,6 +52,9 @@ scene.add(landscape);
 
 // Wind HUD
 createWindHUD();
+
+// Quiz
+const quiz = new Quiz();
 
 // ── Input ─────────────────────────────────────────────────────
 const keys = { left: false, right: false };
@@ -111,6 +115,9 @@ function animate() {
 
   // Wind gauge
   updateWindHUD(windAngle);
+
+  // Quiz
+  quiz.update(windAngle, dt);
 
   // Water uniforms
   const wm = water.material as THREE.ShaderMaterial;

@@ -78,7 +78,7 @@ export function updateWindHUD(windAngle: number): void {
   const px = -vy; // perpendicular
   const py = vx;
 
-  const pointerLen = 44;  // long arm — points downwind
+  const pointerLen = 32;  // points downwind
   const tailLen = 30;     // shaft into the wind
 
   const tipX = HALF + vx * pointerLen;
@@ -94,9 +94,14 @@ export function updateWindHUD(windAngle: number): void {
   const triSX = HALF - vx * triStart; // triangle start point
   const triSY = HALF - vy * triStart;
 
+  const headW = 5;        // half-width of arrowhead barbs
+  const headBack = 8;     // how far back the barbs extend from tip
+
   ctx.beginPath();
-  // Pointy nose
+  // Arrowhead
   ctx.moveTo(tipX, tipY);
+  ctx.lineTo(tipX - vx * headBack + px * headW, tipY - vy * headBack + py * headW);
+  ctx.lineTo(tipX - vx * headBack + px * shaftW, tipY - vy * headBack + py * shaftW);
   // Down to shaft (starboard edge)
   ctx.lineTo(HALF + vx * 6 + px * shaftW, HALF + vy * 6 + py * shaftW);
   // Straight shaft to triangle start
@@ -110,6 +115,9 @@ export function updateWindHUD(windAngle: number): void {
   // Back to shaft
   ctx.lineTo(triSX - px * shaftW, triSY - py * shaftW);
   ctx.lineTo(HALF + vx * 6 - px * shaftW, HALF + vy * 6 - py * shaftW);
+  // Other side of arrowhead
+  ctx.lineTo(tipX - vx * headBack - px * shaftW, tipY - vy * headBack - py * shaftW);
+  ctx.lineTo(tipX - vx * headBack - px * headW, tipY - vy * headBack - py * headW);
   ctx.closePath();
   ctx.fillStyle = col;
   ctx.fill();
