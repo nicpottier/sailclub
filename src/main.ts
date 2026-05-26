@@ -24,7 +24,7 @@ scene.fog = new THREE.FogExp2(0xa8cce0, 0.012);
 // Camera — pull back on mobile for wider view
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 200);
 if (isTouchDevice) {
-  camera.position.set(0.3, 2.2, 6.5);
+  camera.position.set(0.3, 3.0, 9.0);
 } else {
   camera.position.set(0.3, 1.4, 3.5);
 }
