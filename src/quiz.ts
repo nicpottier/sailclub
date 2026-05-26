@@ -43,7 +43,7 @@ function timeMult(level: number): number {
 interface Command {
   text: string;
   timeLimit: number;
-  check: (startAngle: number, current: number) => 'pending' | 'correct';
+  check: (startAngle: number, current: number) => 'pending' | 'correct' | 'wrong';
 }
 
 function pick<T>(arr: T[]): T {
@@ -52,11 +52,18 @@ function pick<T>(arr: T[]): T {
 
 // Level 1
 
+function didCross(start: number, cur: number): boolean {
+  return Math.sign(start) !== 0 && Math.sign(cur) !== 0 && Math.sign(start) !== Math.sign(cur);
+}
+
 function headUpCmd(level: number): Command {
   return {
     text: pick(['Head Up!', 'Luff Up!', 'Come Up!']),
     timeLimit: 5 * timeMult(level),
-    check: (start, cur) => absDeg(start) - absDeg(cur) > 11 ? 'correct' : 'pending',
+    check: (start, cur) => {
+      if (didCross(start, cur)) return 'wrong';
+      return absDeg(start) - absDeg(cur) > 11 ? 'correct' : 'pending';
+    },
   };
 }
 
@@ -64,7 +71,10 @@ function bearAwayCmd(level: number): Command {
   return {
     text: pick(['Bear Away!', 'Fall Off!', 'Head Down!']),
     timeLimit: 5 * timeMult(level),
-    check: (start, cur) => absDeg(cur) - absDeg(start) > 11 ? 'correct' : 'pending',
+    check: (start, cur) => {
+      if (didCross(start, cur)) return 'wrong';
+      return absDeg(cur) - absDeg(start) > 11 ? 'correct' : 'pending';
+    },
   };
 }
 
@@ -72,7 +82,8 @@ function targetCmd(label: string, minDeg: number, maxDeg: number, level: number)
   return {
     text: pick([`Go to a ${label}`, `Sail ${label}`]),
     timeLimit: 10 * timeMult(level),
-    check: (_start, cur) => {
+    check: (start, cur) => {
+      if (didCross(start, cur)) return 'wrong';
       const d = absDeg(cur);
       return d >= minDeg && d <= maxDeg ? 'correct' : 'pending';
     },
@@ -141,53 +152,92 @@ function jibeToTargetCmd(label: string, minDeg: number, maxDeg: number, level: n
   };
 }
 
-// ── Command generation ────────────────────────────────────────
+// ── Command generation (bag system — no repeats) ──────────────
 
-function generateCommand(windAngle: number, level: number): Command {
+// Each entry: [category, factory]. Commands with the same category
+// are treated as duplicates. The bag ensures every category is used
+// before any repeats.
+type CmdFactory = (windAngle: number, level: number) => Command | null;
+
+const CMD_POOL: [string, CmdFactory][] = [
+  ['head-up',     (_, l) => headUpCmd(l)],
+  ['bear-away',   (_, l) => bearAwayCmd(l)],
+  ['close-hauled', (_, l) => targetCmd('Close Hauled', 30, 52, l)],
+  ['close-reach', (_, l) => targetCmd('Close Reach', 48, 77, l)],
+  ['beam-reach',  (_, l) => targetCmd('Beam Reach', 73, 107, l)],
+  ['broad-reach', (_, l) => targetCmd('Broad Reach', 103, 152, l)],
+  ['run',         (_, l) => targetCmd('Run', 148, 180, l)],
+  ['tack',        (_, l) => tackCmd(l)],
+  ['jibe',        (_, l) => jibeCmd(l)],
+  // Level 2 compound
+  ['tack-close-hauled', (_, l) => l >= 2 ? tackToTargetCmd('Close Hauled', 30, 52, l) : null],
+  ['tack-close-reach',  (_, l) => l >= 2 ? tackToTargetCmd('Close Reach', 48, 77, l) : null],
+  ['tack-beam-reach',   (_, l) => l >= 2 ? tackToTargetCmd('Beam Reach', 73, 107, l) : null],
+  ['jibe-broad-reach',  (_, l) => l >= 2 ? jibeToTargetCmd('Broad Reach', 103, 152, l) : null],
+  ['jibe-beam-reach',   (_, l) => l >= 2 ? jibeToTargetCmd('Beam Reach', 73, 107, l) : null],
+];
+
+function isAvailable(cat: string, windAngle: number, level: number): boolean {
   const deg = absDeg(windAngle);
   const pos = getPointOfSail(windAngle);
-  const cmds: Command[] = [];
-
-  if (deg > 45) cmds.push(headUpCmd(level));
-  if (deg < 155) cmds.push(bearAwayCmd(level));
-
-  if (pos !== 'Close Hauled' && pos !== 'In Irons')
-    cmds.push(targetCmd('Close Hauled', 30, 52, level));
-  if (pos !== 'Close Reach')
-    cmds.push(targetCmd('Close Reach', 48, 77, level));
-  if (pos !== 'Beam Reach')
-    cmds.push(targetCmd('Beam Reach', 73, 107, level));
-  if (pos !== 'Broad Reach')
-    cmds.push(targetCmd('Broad Reach', 103, 152, level));
-  if (pos !== 'Running')
-    cmds.push(targetCmd('Run', 148, 180, level));
-
-  if (deg < 120 && pos !== 'In Irons') cmds.push(tackCmd(level));
-  if (deg > 100) cmds.push(jibeCmd(level));
-
-  if (level >= 2) {
-    if (deg < 120 && pos !== 'In Irons') {
-      cmds.push(tackToTargetCmd('Close Hauled', 30, 52, level));
-      cmds.push(tackToTargetCmd('Beam Reach', 73, 107, level));
-      if (pos !== 'Close Reach')
-        cmds.push(tackToTargetCmd('Close Reach', 48, 77, level));
-    }
-    if (deg > 100) {
-      cmds.push(jibeToTargetCmd('Broad Reach', 103, 152, level));
-      cmds.push(jibeToTargetCmd('Beam Reach', 73, 107, level));
-    }
+  switch (cat) {
+    case 'head-up':       return deg > 45;
+    case 'bear-away':     return deg < 155;
+    case 'close-hauled':  return pos !== 'Close Hauled' && pos !== 'In Irons';
+    case 'close-reach':   return pos !== 'Close Reach';
+    case 'beam-reach':    return pos !== 'Beam Reach';
+    case 'broad-reach':   return pos !== 'Broad Reach';
+    case 'run':           return pos !== 'Running';
+    case 'tack':          return deg < 120 && pos !== 'In Irons';
+    case 'jibe':          return deg > 100;
+    case 'tack-close-hauled': return level >= 2 && deg < 120 && pos !== 'In Irons';
+    case 'tack-close-reach':  return level >= 2 && deg < 120 && pos !== 'In Irons' && pos !== 'Close Reach';
+    case 'tack-beam-reach':   return level >= 2 && deg < 120 && pos !== 'In Irons';
+    case 'jibe-broad-reach':  return level >= 2 && deg > 100;
+    case 'jibe-beam-reach':   return level >= 2 && deg > 100;
+    default: return false;
   }
+}
 
-  return pick(cmds);
+let bag: string[] = [];
+
+function refillBag(): void {
+  bag = CMD_POOL.map(([cat]) => cat);
+  // Shuffle (Fisher-Yates)
+  for (let i = bag.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [bag[i], bag[j]] = [bag[j], bag[i]];
+  }
+}
+
+function generateCommand(windAngle: number, level: number): Command {
+  // Try pulling from the bag until we find something valid
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (bag.length === 0) refillBag();
+    for (let i = 0; i < bag.length; i++) {
+      const cat = bag[i];
+      if (isAvailable(cat, windAngle, level)) {
+        bag.splice(i, 1);
+        const factory = CMD_POOL.find(([c]) => c === cat)![1];
+        const cmd = factory(windAngle, level);
+        if (cmd) return cmd;
+      }
+    }
+    // Nothing in bag was valid — refill and try once more
+    bag = [];
+  }
+  // Fallback (shouldn't happen)
+  return bearAwayCmd(level);
 }
 
 // ── Quiz class ────────────────────────────────────────────────
 
-type Phase = 'idle' | 'showing' | 'result';
+type Phase = 'help' | 'idle' | 'showing' | 'result';
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 const PIPS_PER_LEVEL = 10;
 
 export class Quiz {
-  private phase: Phase = 'idle';
+  private phase: Phase = 'help';
   private phaseTimer = 4;
   private score = 0;
   private pips = 0;
@@ -205,6 +255,7 @@ export class Quiz {
   private cmdEl!: HTMLDivElement;
   private timerEl!: HTMLDivElement;
   private feedbackEl!: HTMLDivElement;
+  private helpEl!: HTMLDivElement;
 
   constructor() {
     this.injectStyles();
@@ -295,6 +346,15 @@ export class Quiz {
         50%  { transform: scale(1.3); color: #ffee88; }
         100% { transform: scale(1); }
       }
+      #quiz-help {
+        position: fixed; top: 40%; left: 50%; transform: translate(-50%, -50%);
+        color: #fff; font: 20px sans-serif; text-align: center;
+        text-shadow: 0 2px 8px rgba(0,0,0,0.7);
+        line-height: 1.6;
+        opacity: 1; transition: opacity 1s;
+        pointer-events: none;
+      }
+      #quiz-help.fade { opacity: 0; }
     `;
     document.head.appendChild(style);
   }
@@ -338,6 +398,12 @@ export class Quiz {
     const fill = document.createElement('div');
     fill.id = 'quiz-timer-fill';
     this.timerEl.appendChild(fill);
+
+    // Help overlay
+    this.helpEl = this.el('quiz-help');
+    this.helpEl.innerHTML = isTouchDevice
+      ? 'Drag left or right to steer'
+      : 'Use <b>\u2190</b> <b>\u2192</b> arrow keys to steer';
   }
 
   private el(id: string): HTMLDivElement {
@@ -373,6 +439,14 @@ export class Quiz {
     this.posEl.textContent = tack ? `${pos} — ${tack} Tack` : pos;
 
     switch (this.phase) {
+      case 'help':
+        this.phaseTimer -= dt;
+        if (this.phaseTimer <= 0) {
+          this.helpEl.classList.add('fade');
+          this.phase = 'idle';
+          this.phaseTimer = 1.5;
+        }
+        break;
       case 'idle':
         this.phaseTimer -= dt;
         if (this.phaseTimer <= 0) this.startCommand(windAngle);
@@ -413,7 +487,9 @@ export class Quiz {
 
     const result = this.cmd.check(this.cmdStartAngle, windAngle);
 
-    if (result === 'correct') {
+    if (result === 'wrong') {
+      this.finishCommand('wrong');
+    } else if (result === 'correct') {
       this.holdTime += dt;
       if (this.holdTime >= Quiz.HOLD_DURATION) {
         this.finishCommand('correct');
@@ -426,7 +502,7 @@ export class Quiz {
     }
   }
 
-  private finishCommand(result: 'correct' | 'timeout'): void {
+  private finishCommand(result: 'correct' | 'wrong' | 'timeout'): void {
     this.cmdEl.classList.remove('visible');
     this.timerEl.classList.remove('visible');
 
@@ -454,6 +530,12 @@ export class Quiz {
         this.feedbackEl.style.color = '#44ff66';
         this.phaseTimer = 2;
       }
+    } else if (result === 'wrong') {
+      this.pips = 0;
+      this.updatePips();
+      this.feedbackEl.textContent = 'No need to tack or jibe!';
+      this.feedbackEl.style.color = '#ff4444';
+      this.phaseTimer = 2;
     } else {
       this.pips = 0;
       this.updatePips();
